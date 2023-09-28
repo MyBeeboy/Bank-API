@@ -4,8 +4,8 @@ services:
     image: redis
     expose:
       - 6379
-    environment:
-      REDIS_PASSWORD: Fs#5132Xcza
+    #environment:
+     # REDIS_PASSWORD: Fs#5132Xcza
 
   node_service:
     image: node:18-alpine3.17
