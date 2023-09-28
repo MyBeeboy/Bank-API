@@ -1,9 +1,14 @@
-version: '3'
+version: '3.8'
 services:
   redis:
     image: redis
     expose:
       - 6379
+    ports:
+      - 6379:6379
+    environment:
+      REDIS_PASSWORD: Fs#5132Xcza
+
   node_service:
     image: node:18-alpine3.17
     container_name: api-service
