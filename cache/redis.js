@@ -1,30 +1,52 @@
-import { createClient } from 'redis'
+import Redis from 'ioredis'
 import moment from 'moment'
 import { GATEWAY_DB_CIMB } from '#db/query'
 import { config_cimb_v2 } from '#API/CIMB/config'
 import { COOP_DB } from '#db/query'
 import configs from '#constants/configs'
+import { c_time } from '#libs/Functions'
 
-const Client = createClient({
-    legacyMode: true,
-    socket: {...configs.redis}
-})
+const redisConnection = () => {
+    return new Promise((resolve, reject) => {
+        const redis = new Redis({ ...configs.redis })
+        redis.on('connect', () => {
+            console.log(`[${c_time()}][Redis] Client Listening on PORT :`, configs.redis.port)
+            resolve(redis)
+        })
 
-Client.on('error', err => console.log('Redis Client Error', err))
+        redis.on('error', (error) => {
+            console.error(`[${c_time()}][Redis] Connection error :`, error)
+            reject(error)
+        })
+    })
+}
+
+const Client = await redisConnection()
+
+// const Client_sub = await redisConnection()
+
+// Client_sub.subscribe('expireValue', (err, count) => {
+//     if (!err) console.log(`[${c_time()}][CACHE] Subscribe expire started`)
+// })
+
+// Client_sub.on('message', (channel, message) => {
+//     if (channel === 'expireValue') {
+//         const { key, value } = JSON.parse(message)
+//         console.log(`Key "${key}" expired with value "${value}".`)
+//     }
+// })
 
 export const Startup_Config = async () => {
-    await Client.connect()
-    if (Client.isOpen) {
+    if (Client.status == 'connect') {
         //Client.configSet("notify-keyspace-events", "Ex")
-        console.log("[Redis] Client Listening on PORT =>", 6379)
         await Client.set('INIT_CONFIGS:CIMB', JSON.stringify(await GATEWAY_DB_CIMB.GET_INIT_TO_CACHE()))
         const coops = ['PEA', 'IGAT']
         coops.forEach(async (coop) => await Client.set(`CRON_${coop}:STATUS`, '0'))
-        // await Client.setEx("test", 10 , "1")
-        // await Client.set('test_ex','2')
+        await setEx('test' , '123' , 5)
+        await setEx('test2' , '456' , 5)
     }
-    const sub = Client.duplicate()
-    await sub.connect()
+    // const sub = Client.duplicate()
+    // await sub.connect()
 
     // sub.subscribe("__keyevent@0__:expired", async (key) => {
     //     const payload = await Client.get(`${key}:EX`)
@@ -52,12 +74,42 @@ export const BUFFER_QUERY = async (query) => {
     return await Client.keys(`*${query}*`)
 }
 
+export const setEx = async (key, value, ttl) => {
+    await Client.set(key, value)
+    // await Client.publish('expireValue', JSON.stringify({ key, value }))
+    await Client.expire(key , ttl)
+}
+
+export const token_session = {
+    type: 'SESSION_TRANS',
+    async SET (uuid,bank,token) {
+        await Client.setex(
+            `${this.type}:${bank}:${uuid}`,
+            28 * 60, //  28 Minute
+            JSON.stringify(token)
+        )
+    },
+    async GET (uuid,bank) {
+        if (await Client.get(`${this.type}:${bank}:${uuid}`) === null) return true
+    },
+    async GET_RAW(uuid,bank) {
+        return JSON.parse(await Client.get(`${this.type}:${bank}:${uuid}`))
+    },
+    async GET_AUTH (uuid,bank) {
+        const result = JSON.parse(await Client.get(`${this.type}:${bank}:${uuid}`))
+        return result?.access_token ?? null
+    },
+    async DEL (uuid,bank) {
+        await Client.del(`${this.type}:${bank}:${uuid}`)
+    }
+}
+
 // ===== CIMB ====== //
 
 export const CIMB_TOKEN = {
     type: 'TRANSACTION',
     async SET(uuid, token) {
-        await Client.setEx(
+        await Client.setex(
             `${this.type}:${config_cimb_v2.bank_name}:${uuid}`,
             13 * 60, // 13 Minute
             JSON.stringify(token)
